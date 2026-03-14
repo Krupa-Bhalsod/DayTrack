@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Path, Header
 from typing import List
 from app.services.task_service import TaskService
-from app.schemas.task_schema import TaskCreate, TaskUpdate, TaskResponse
+from app.schemas.task_schema import TaskCreate, TaskUpdate, TaskResponse, ArchivedTaskResponse
 from app.core.config import settings
 
 router = APIRouter(prefix="/tasks", tags=["Tasks"])
@@ -38,3 +38,17 @@ async def mark_task_complete(task_id: str):
     if not updated_task:
         raise HTTPException(status_code=404, detail="Task not found")
     return updated_task
+
+@router.get("/history", response_model=List[ArchivedTaskResponse])
+async def get_task_history(date: str):
+    """
+    Fetch historical tasks from the archive for a specific date (YYYY-MM-DD).
+    """
+    return await TaskService.get_archived_tasks(settings.DEFAULT_USER_ID, date)
+
+@router.post("/archive")
+async def archive_tasks(date: str):
+    """
+    Manually trigger archiving of all current tasks for the default user.
+    """
+    return await TaskService.archive_user_tasks(settings.DEFAULT_USER_ID, date)

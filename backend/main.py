@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routes import health_routes, task_routes
+from app.routes import health_routes, task_routes, eod_routes
 from app.database.mongodb import connect_to_mongo, close_mongo_connection, db
 from app.core.config import settings
 from datetime import datetime, timezone
@@ -30,6 +30,7 @@ def create_app() -> FastAPI:
     # Routers
     app.include_router(health_routes.router)
     app.include_router(task_routes.router)
+    app.include_router(eod_routes.router)
 
 
     # Startup Event
