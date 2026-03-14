@@ -3,6 +3,7 @@ from typing import List, Optional
 from app.database.mongodb import db
 from app.services.task_service import TaskService
 from app.schemas.summary_schema import DailySummary
+from app.core.websocket_manager import manager
 
 class EODService:
     @staticmethod
@@ -49,12 +50,34 @@ class EODService:
         # 5. Archive tasks (TaskService handles the movement and status conversion)
         archive_result = await TaskService.archive_user_tasks(user_id, date)
         
+        # 6. Notify User via WebSocket (Requirement 3.B)
+        await EODService.notify_user(user_id, summary_data)
+
         return {
             "success": True,
             "date": date,
             "summary": summary_data,
             "archived_count": archive_result.get("archived_count", 0)
         }
+
+    @staticmethod
+    async def notify_user(user_id: str, summary: dict):
+        """
+        Sends a real-time notification via WebSocket (Requirement 3.B).
+        """
+        notification = {
+            "type": "EOD_SUMMARY",
+            "title": "Daily Summary Generated",
+            "data": {
+                "date": summary['date'],
+                "tasks_created": summary['tasks_created'],
+                "tasks_completed": summary['tasks_completed'],
+                "tasks_pending": summary['tasks_pending'],
+                "completion_percentage": summary['completion_percentage'],
+                "executed_at": summary['generated_at'].isoformat() if hasattr(summary['generated_at'], 'isoformat') else summary['generated_at']
+            }
+        }
+        await manager.send_personal_message(notification, user_id)
 
     @staticmethod
     async def get_daily_summaries(user_id: str) -> List[dict]:

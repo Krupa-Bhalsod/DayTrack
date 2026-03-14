@@ -1,9 +1,10 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routes import health_routes, task_routes, eod_routes
+from datetime import datetime, timezone
+from app.core.scheduler import start_scheduler, stop_scheduler
+from app.routes import health_routes, task_routes, eod_routes, websocket_routes
 from app.database.mongodb import connect_to_mongo, close_mongo_connection, db
 from app.core.config import settings
-from datetime import datetime, timezone
 
 
 def create_app() -> FastAPI:
@@ -31,6 +32,7 @@ def create_app() -> FastAPI:
     app.include_router(health_routes.router)
     app.include_router(task_routes.router)
     app.include_router(eod_routes.router)
+    app.include_router(websocket_routes.router)
 
 
     # Startup Event
@@ -48,12 +50,16 @@ def create_app() -> FastAPI:
                 "created_at": datetime.now(timezone.utc)
             })
             print(f"Created default user with ID: {settings.DEFAULT_USER_ID}")
+        
+        # Start background EOD scheduler
+        start_scheduler()
 
     # Shutdown Event
     @app.on_event("shutdown")
     async def shutdown_event():
         print("DayTrack API shutting down...")
         await close_mongo_connection()
+        stop_scheduler()
 
     return app
 
