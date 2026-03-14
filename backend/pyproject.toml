@@ -10,5 +10,5 @@ dependencies = [
     "motor>=3.7.1",
     "pydantic>=2.12.5",
     "python-dotenv>=1.2.2",
-    "uvicorn>=0.41.0",
+    "uvicorn[standard]>=0.41.0",
 ]

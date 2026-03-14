@@ -3,6 +3,7 @@ from typing import List, Optional
 from bson import ObjectId
 from app.database.mongodb import db
 from app.schemas.task_schema import TaskCreate, TaskUpdate
+from app.core.websocket_manager import manager
 
 class TaskService:
     @staticmethod
@@ -62,6 +63,8 @@ class TaskService:
         
         if result:
             result["_id"] = str(result["_id"])
+            if update_dict.get("status") == "COMPLETED":
+                await TaskService.notify_task_completed(result)
         return result
 
     @staticmethod
@@ -86,6 +89,7 @@ class TaskService:
         
         if result:
             result["_id"] = str(result["_id"])
+            await TaskService.notify_task_completed(result)
         return result
 
     @staticmethod
@@ -143,3 +147,20 @@ class TaskService:
         except Exception as e:
             # If insertion fails, we don't delete from active tasks
             raise e
+
+    @staticmethod
+    async def notify_task_completed(task: dict):
+        """
+        Sends a real-time notification via WebSocket when a task is completed.
+        """
+        notification = {
+            "type": "TASK_COMPLETED",
+            "title": "Task Completed! 🎉",
+            "message": f"Congratulations! You've finished: {task.get('title')}",
+            "data": {
+                "task_id": task.get("_id"),
+                "title": task.get("title"),
+                "completed_at": task.get("completed_at").isoformat() if hasattr(task.get("completed_at"), "isoformat") else task.get("completed_at")
+            }
+        }
+        await manager.send_personal_message(notification, task.get("user_id"))
