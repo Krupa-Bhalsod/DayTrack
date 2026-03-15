@@ -3,16 +3,16 @@ from typing import Optional
 from datetime import datetime
 
 class TaskBase(BaseModel):
-    title: str
-    description: Optional[str] = None
+    title: str = Field(..., min_length=1)
+    description: str = Field(..., min_length=1)
     status: str = "PENDING"
 
 class TaskCreate(TaskBase):
     pass
 
 class TaskUpdate(BaseModel):
-    title: Optional[str] = None
-    description: Optional[str] = None
+    title: str = Field(..., min_length=1)
+    description: str = Field(..., min_length=1)
     status: Optional[str] = None
 
 class TaskResponse(TaskBase):

@@ -1,9 +1,10 @@
 from datetime import datetime, timezone
 from typing import List, Optional
-from bson import ObjectId
 from app.database.mongodb import db
 from app.schemas.task_schema import TaskCreate, TaskUpdate
 from app.core.websocket_manager import manager
+from app.core.exceptions import NotFoundException
+from app.utils.mongo_utils import parse_object_id, document_to_dict
 
 class TaskService:
     @staticmethod
@@ -24,11 +25,7 @@ class TaskService:
     @staticmethod
     async def get_tasks(user_id: str) -> List[dict]:
         cursor = db.tasks.find({"user_id": user_id})
-        tasks = []
-        async for task in cursor:
-            task["_id"] = str(task["_id"])
-            tasks.append(task)
-        return tasks
+        return [document_to_dict(task) async for task in cursor]
 
     @staticmethod
     async def get_today_tasks(user_id: str) -> List[dict]:
@@ -37,17 +34,21 @@ class TaskService:
             "user_id": user_id,
             "created_at": {"$gte": today_start}
         })
-        tasks = []
-        async for task in cursor:
-            task["_id"] = str(task["_id"])
-            tasks.append(task)
-        return tasks
+        return [document_to_dict(task) async for task in cursor]
 
     @staticmethod
-    async def update_task(task_id: str, task_data: TaskUpdate) -> Optional[dict]:
+    async def get_task_or_404(task_id: str, collection="tasks") -> dict:
+        oid = parse_object_id(task_id)
+        task = await db[collection].find_one({"_id": oid})
+        if not task:
+            raise NotFoundException(f"Task with ID {task_id} not found")
+        return document_to_dict(task)
+
+    @staticmethod
+    async def update_task(task_id: str, task_data: TaskUpdate) -> dict:
         update_dict = {k: v for k, v in task_data.model_dump(exclude_unset=True).items()}
         if not update_dict:
-            return None
+            return await TaskService.get_task_or_404(task_id)
         
         now = datetime.now(timezone.utc)
         update_dict["updated_at"] = now
@@ -56,27 +57,31 @@ class TaskService:
             update_dict["completed_at"] = now
 
         result = await db.tasks.find_one_and_update(
-            {"_id": ObjectId(task_id)},
+            {"_id": parse_object_id(task_id)},
             {"$set": update_dict},
             return_document=True
         )
         
-        if result:
-            result["_id"] = str(result["_id"])
-            if update_dict.get("status") == "COMPLETED":
-                await TaskService.notify_task_completed(result)
-        return result
+        if not result:
+            raise NotFoundException(f"Task with ID {task_id} not found")
+            
+        task = document_to_dict(result)
+        if update_dict.get("status") == "COMPLETED":
+            await TaskService.notify_task_completed(task)
+        return task
 
     @staticmethod
     async def delete_task(task_id: str) -> bool:
-        result = await db.tasks.delete_one({"_id": ObjectId(task_id)})
-        return result.deleted_count > 0
+        result = await db.tasks.delete_one({"_id": parse_object_id(task_id)})
+        if result.deleted_count == 0:
+            raise NotFoundException(f"Task with ID {task_id} not found")
+        return True
 
     @staticmethod
-    async def mark_task_complete(task_id: str) -> Optional[dict]:
+    async def mark_task_complete(task_id: str) -> dict:
         now = datetime.now(timezone.utc)
         result = await db.tasks.find_one_and_update(
-            {"_id": ObjectId(task_id)},
+            {"_id": parse_object_id(task_id)},
             {
                 "$set": {
                     "status": "COMPLETED",
@@ -87,31 +92,31 @@ class TaskService:
             return_document=True
         )
         
-        if result:
-            result["_id"] = str(result["_id"])
-            await TaskService.notify_task_completed(result)
-        return result
+        if not result:
+            raise NotFoundException(f"Task with ID {task_id} not found")
+            
+        task = document_to_dict(result)
+        await TaskService.notify_task_completed(task)
+        return task
 
     @staticmethod
-    async def get_archived_tasks(user_id: str, date: str) -> List[dict]:
-        cursor = db.archived_tasks.find({
-            "user_id": user_id,
-            "archive_date": date
-        })
-        tasks = []
-        async for task in cursor:
-            task["_id"] = str(task["_id"])
-            tasks.append(task)
-        return tasks
+    async def get_archived_tasks(user_id: str, date: Optional[str] = None) -> List[dict]:
+        query = {"user_id": user_id}
+        if date:
+            query["archive_date"] = date
+        
+        cursor = db.archived_tasks.find(query).sort("archive_date", -1)
+        return [document_to_dict(task) async for task in cursor]
+
+    @staticmethod
+    async def delete_archived_task(task_id: str) -> bool:
+        result = await db.archived_tasks.delete_one({"_id": parse_object_id(task_id)})
+        if result.deleted_count == 0:
+            raise NotFoundException(f"Archived task with ID {task_id} not found")
+        return True
 
     @staticmethod
     async def archive_user_tasks(user_id: str, date: str) -> dict:
-        """
-        Archive tasks for a specific user and date.
-        Moves tasks from 'tasks' to 'archived_tasks'.
-        Works without transactions for standalone MongoDB compatibility.
-        """
-        # 1. Fetch tasks
         cursor = db.tasks.find({"user_id": user_id})
         tasks_to_archive = await cursor.to_list(length=None)
         
@@ -132,10 +137,7 @@ class TaskService:
             archived_docs.append(archived_doc)
         
         try:
-            # 2. Insert into archived_tasks
             await db.archived_tasks.insert_many(archived_docs)
-            
-            # 3. Remove from active tasks ONLY after successful insertion
             task_ids = [task["_id"] for task in tasks_to_archive]
             await db.tasks.delete_many({"_id": {"$in": task_ids}})
             
@@ -145,18 +147,17 @@ class TaskService:
                 "date": date
             }
         except Exception as e:
-            # If insertion fails, we don't delete from active tasks
+            # Re-raise as a database exception or let it bubble up
             raise e
 
     @staticmethod
     async def notify_task_completed(task: dict):
-        """
-        Sends a real-time notification via WebSocket when a task is completed.
-        """
+        user_id = task.get("user_id")
+        print(f"Attempting to send notification for task {task.get('_id')} to user {user_id}")
         notification = {
             "type": "TASK_COMPLETED",
-            "title": "Task Completed! 🎉",
-            "message": f"Congratulations! You've finished: {task.get('title')}",
+            "title": "Task Completed! 🚀",
+            "message": f"Hurray! {task.get('title')} is completed!",
             "data": {
                 "task_id": task.get("_id"),
                 "title": task.get("title"),
