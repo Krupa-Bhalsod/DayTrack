@@ -26,7 +26,13 @@ db = MongoDB()
 async def connect_to_mongo():
     db.client = AsyncIOMotorClient(settings.MONGODB_URL)
     db.db = db.client[settings.DATABASE_NAME]
-    print("Connected to MongoDB")
+    
+    # Create Indexes for efficient querying
+    await db.tasks.create_index([("user_id", 1), ("created_at", 1)])
+    await db.archived_tasks.create_index([("user_id", 1), ("archive_date", -1)])
+    await db.daily_summaries.create_index([("user_id", 1), ("date", -1)], unique=True)
+    
+    print("Connected to MongoDB and initialized indexes")
 
 async def close_mongo_connection():
     if db.client:

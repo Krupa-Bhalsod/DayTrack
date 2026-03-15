@@ -5,6 +5,9 @@ from app.core.scheduler import start_scheduler, stop_scheduler
 from app.routes import health_routes, task_routes, eod_routes, websocket_routes
 from app.database.mongodb import connect_to_mongo, close_mongo_connection, db
 from app.core.config import settings
+from app.core.exceptions import DayTrackException
+from fastapi.responses import JSONResponse
+from fastapi import Request
 
 
 def create_app() -> FastAPI:
@@ -18,6 +21,8 @@ def create_app() -> FastAPI:
     origins = [
         "http://localhost:3000",
         "http://127.0.0.1:3000",
+        "http://localhost:3001",
+        "http://127.0.0.1:3001",
     ]
 
     app.add_middleware(
@@ -33,6 +38,14 @@ def create_app() -> FastAPI:
     app.include_router(task_routes.router)
     app.include_router(eod_routes.router)
     app.include_router(websocket_routes.router)
+
+    # Exception Handlers
+    @app.exception_handler(DayTrackException)
+    async def daytrack_exception_handler(request: Request, exc: DayTrackException):
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"detail": exc.public_message},
+        )
 
 
     # Startup Event
