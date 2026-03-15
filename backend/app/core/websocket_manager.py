@@ -21,9 +21,14 @@ class ConnectionManager:
         print(f"User {user_id} disconnected from WebSocket")
 
     async def send_personal_message(self, message: dict, user_id: str):
+        user_id = str(user_id)
+        print(f"WS Manager: Looking for user {user_id}. Active users: {list(self.active_connections.keys())}")
         if user_id in self.active_connections:
+            print(f"WS Manager: Found {len(self.active_connections[user_id])} connections for user {user_id}")
             for connection in self.active_connections[user_id]:
                 await connection.send_json(message)
+        else:
+            print(f"WS Manager: No active connections for user {user_id}")
 
     async def broadcast(self, message: dict):
         for user_id in self.active_connections:
